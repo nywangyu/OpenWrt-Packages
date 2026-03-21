@@ -1,5 +1,4 @@
 -- Copyright 2018-2020 Lienol <lawlienol@gmail.com>
--- Improve by xiaozhuai <xiaozhuai7@gmail.com>
 module("luci.controller.filebrowser", package.seeall)
 
 local http = require "luci.http"
@@ -31,7 +30,9 @@ end
 
 function act_status()
     local e = {}
-    e.status = luci.sys.call("ps -w | grep -v grep | grep 'filebrowser -a' >/dev/null") == 0
+    e.status = luci.sys.call(
+                   "busybox ps -w | grep -v grep | grep 'filebrowser -a 0.0.0.0' >/dev/null") ==
+                   0
     http_write_json(e)
 end
 
@@ -54,6 +55,7 @@ function action_download()
 end
 
 function get_log()
-    luci.http.write(luci.sys.exec("[ -f '/var/log/filebrowser.log' ] && cat /var/log/filebrowser.log"))
+    luci.http.write(luci.sys.exec(
+                        "[ -f '/var/log/filebrowser.log' ] && cat /var/log/filebrowser.log"))
 end
 function clear_log() luci.sys.call("echo '' > /var/log/filebrowser.log") end

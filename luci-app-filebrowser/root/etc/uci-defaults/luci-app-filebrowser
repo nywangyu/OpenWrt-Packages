@@ -7,6 +7,5 @@ uci -q batch <<-EOF >/dev/null
 	commit ucitrack
 EOF
 
-chmod +x /etc/init.d/filebrowser
 rm -f /tmp/luci-indexcache
 exit 0
