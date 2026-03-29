@@ -381,6 +381,31 @@ openclaw_version() {
 	sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$pkg" 2>/dev/null | head -n 1
 }
 
+local_openclaw_version() {
+	[ -x "$NPM_BIN" ] || return 0
+	HOME="$DATA_DIR" npm_config_cache="${BASE_DIR}/npm-cache" \
+		PATH="${NODE_DIR}/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+		"$NPM_BIN" list -g openclaw --prefix="$GLOBAL_DIR" --depth=0 --json 2>/dev/null \
+		| "$NODE_BIN" -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{try{let o=JSON.parse(s||"{}");let v=o&&o.dependencies&&o.dependencies.openclaw&&o.dependencies.openclaw.version;if(v)process.stdout.write(String(v));}catch(_){}})'
+}
+
+latest_openclaw_version() {
+	local npm_registry=""
+	[ -x "$NPM_BIN" ] || return 0
+	if [ "${INSTALL_ACCELERATED:-1}" = "1" ]; then
+		npm_registry="https://registry.npmmirror.com"
+	fi
+	if [ -n "$npm_registry" ]; then
+		HOME="$DATA_DIR" npm_config_cache="${BASE_DIR}/npm-cache" npm_config_registry="$npm_registry" \
+			PATH="${NODE_DIR}/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+			"$NPM_BIN" view openclaw version 2>/dev/null | tr -d '\r' | head -n 1
+	else
+		HOME="$DATA_DIR" npm_config_cache="${BASE_DIR}/npm-cache" \
+			PATH="${NODE_DIR}/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+			"$NPM_BIN" view openclaw version 2>/dev/null | tr -d '\r' | head -n 1
+	fi
+}
+
 have_openclaw_runtime() {
 	[ -x "$NODE_BIN" ] || return 1
 	find_entry >/dev/null 2>&1 || return 1
@@ -559,15 +584,14 @@ if selected_env_key and selected_api_key ~= "" then
 end
 cfg.env = next(env) and env or nil
 
-local models = {}
-models.mode = "merge"
-local providers = {}
-models.providers = providers
-cfg.models = models
+	local models = ensure_table(cfg, "models")
+	if type(models.mode) ~= "string" or models.mode == "" then
+		models.mode = "merge"
+	end
+	local providers = ensure_table(models, "providers")
 
-local current_provider_id = os.getenv("DEFAULT_AGENT_NAME") or "anthropic"
-local current_provider = {}
-providers[current_provider_id] = current_provider
+	local current_provider_id = os.getenv("DEFAULT_AGENT_NAME") or "anthropic"
+	local current_provider = ensure_table(providers, current_provider_id)
 
 if current_provider_id == "openai" then
 	current_provider.api = "openai-completions"
@@ -600,13 +624,30 @@ elseif current_provider_id == "moonshot" then
 	}
 end
 
-local override_base = os.getenv("DEFAULT_AGENT_OVERRIDE_BASE_URL") or ""
-local base_url_mode = os.getenv("DEFAULT_AGENT_BASE_URL_MODE") or "default"
-if base_url_mode == "override" and override_base ~= "" then
-	current_provider.baseUrl = override_base
-elseif base_url_mode == "default" then
-	current_provider.baseUrl = os.getenv("DEFAULT_AGENT_BASE_URL") or current_provider.baseUrl
-end
+	local override_base = os.getenv("DEFAULT_AGENT_OVERRIDE_BASE_URL") or ""
+	local base_url_mode = os.getenv("DEFAULT_AGENT_BASE_URL_MODE") or "default"
+	if base_url_mode == "override" and override_base ~= "" then
+		current_provider.baseUrl = override_base
+	elseif base_url_mode == "default" then
+		current_provider.baseUrl = os.getenv("DEFAULT_AGENT_BASE_URL") or current_provider.baseUrl
+	end
+
+	-- luci.jsonc encodes empty Lua tables as JSON arrays ([]). To avoid producing
+	-- invalid provider entries like {"deepseek/deepseek-chat":[]}, drop provider
+	-- records that are empty or look like a provider/model string.
+	do
+		local to_del = {}
+		for k, v in pairs(providers) do
+			if type(k) == "string" and k:find("/", 1, true) then
+				table.insert(to_del, k)
+			elseif type(v) == "table" and next(v) == nil then
+				table.insert(to_del, k)
+			end
+		end
+		for _, k in ipairs(to_del) do
+			providers[k] = nil
+		end
+	end
 
 local agents = ensure_table(cfg, "agents")
 local defaults = ensure_table(agents, "defaults")
@@ -905,6 +946,47 @@ install_openclaw() {
 		return 0
 	}
 
+upgrade_openclaw() {
+	local was_running=0
+	local st=""
+
+	if ! have_openclaw_runtime; then
+		write_installer_log "OpenClaw is not installed yet; fallback to fresh install."
+		install_openclaw
+		return $?
+	fi
+
+	st="$(do_status 2>/dev/null || true)"
+	if [ "$st" = "running" ]; then
+		was_running=1
+		write_installer_log "Stopping OpenClaw service before update"
+		/etc/init.d/openclawmgr stop >/dev/null 2>&1 || true
+	fi
+
+	write_installer_log "Updating OpenClaw via npm"
+	write_installer_log "Current version: $(openclaw_version || echo unknown)"
+	if ! install_openclaw; then
+		write_installer_log "npm update failed"
+		if [ "$was_running" = "1" ] || [ "${ENABLED:-0}" = "1" ]; then
+			write_installer_log "Trying to restore service after failed update"
+			/etc/init.d/openclawmgr start >/dev/null 2>&1 || true
+		fi
+		return 1
+	fi
+
+	ensure_gateway_config || true
+	fix_data_permissions || true
+
+	if [ "$was_running" = "1" ] || [ "${ENABLED:-0}" = "1" ]; then
+		ensure_safe_port_for_start || return 1
+		write_installer_log "Restarting OpenClaw service after update"
+		/etc/init.d/openclawmgr restart >/dev/null 2>&1 || /etc/init.d/openclawmgr start >/dev/null 2>&1 || true
+	fi
+
+	write_installer_log "OpenClaw updated: $(openclaw_version || echo unknown)"
+	return 0
+}
+
 	do_install() {
 		acquire_lock
 		write_installer_log "== install begin =="
@@ -922,6 +1004,11 @@ install_openclaw() {
 		ensure_gateway_config || true
 
 		if have_openclaw_runtime; then
+			if [ "$ACTION" = "upgrade" ]; then
+				write_installer_log "OpenClaw is already installed: $(openclaw_version || echo unknown)"
+				upgrade_openclaw
+				return $?
+			fi
 			write_installer_log "OpenClaw is already installed: $(openclaw_version || echo unknown)"
 			write_installer_log "Skip install. Use restart/apply config if you only need to refresh configuration."
 			return 0
@@ -1309,6 +1396,12 @@ case "$ACTION" in
 	openclaw_version)
 		openclaw_version
 		;;
+	local_openclaw_version)
+		local_openclaw_version
+		;;
+	latest_openclaw_version)
+		latest_openclaw_version
+		;;
 	diag)
 		diag_run "${1:-}" "${2:-}"
 		;;
@@ -1316,7 +1409,7 @@ case "$ACTION" in
 		diag_poll "${1:-}"
 		;;
 	*)
-		echo "Usage: $0 {install|upgrade|uninstall|uninstall_openclaw|purge|rm|start|stop|restart|status|port|token|node_version|openclaw_version|diag|diag_poll}" >&2
+		echo "Usage: $0 {install|upgrade|uninstall|uninstall_openclaw|purge|rm|start|stop|restart|status|port|token|node_version|openclaw_version|local_openclaw_version|latest_openclaw_version|diag|diag_poll}" >&2
 		exit 1
 		;;
 esac

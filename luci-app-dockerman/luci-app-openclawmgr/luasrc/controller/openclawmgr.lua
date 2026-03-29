@@ -16,6 +16,7 @@ function index()
 	entry({"admin", "services", "openclawmgr", "status"}, call("action_status")).leaf = true
 	entry({"admin", "services", "openclawmgr", "ready"}, call("action_ready")).leaf = true
 	entry({"admin", "services", "openclawmgr", "op"}, call("action_op")).leaf = true
+	entry({"admin", "services", "openclawmgr", "check_update"}, call("action_check_update")).leaf = true
 	entry({"admin", "services", "openclawmgr", "config_data"}, call("action_config_data")).leaf = true
 	entry({"admin", "services", "openclawmgr", "apply_config"}, call("action_apply_config")).leaf = true
 
@@ -155,6 +156,78 @@ local function safe_int(v, def, minv, maxv)
 		return maxv
 	end
 	return n
+end
+
+local function trim(v)
+	return tostring(v or ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function split_dots(v)
+	local parts = {}
+	for part in tostring(v or ""):gmatch("[^%.]+") do
+		parts[#parts + 1] = part
+	end
+	return parts
+end
+
+local function semver_compare(a, b)
+	a = trim(a):gsub("^v", "")
+	b = trim(b):gsub("^v", "")
+	if a == "" or b == "" then
+		return nil
+	end
+
+	local a_core, a_pre = a:match("^([^%-]+)%-?(.*)$")
+	local b_core, b_pre = b:match("^([^%-]+)%-?(.*)$")
+	local a_nums = split_dots(a_core)
+	local b_nums = split_dots(b_core)
+	local max_len = math.max(#a_nums, #b_nums)
+
+	for i = 1, max_len do
+		local av = tonumber(a_nums[i] or "0") or 0
+		local bv = tonumber(b_nums[i] or "0") or 0
+		if av ~= bv then
+			return av > bv and 1 or -1
+		end
+	end
+
+	a_pre = trim(a_pre)
+	b_pre = trim(b_pre)
+	if a_pre == "" and b_pre == "" then
+		return 0
+	end
+	if a_pre == "" then
+		return 1
+	end
+	if b_pre == "" then
+		return -1
+	end
+
+	local a_ids = split_dots(a_pre)
+	local b_ids = split_dots(b_pre)
+	max_len = math.max(#a_ids, #b_ids)
+	for i = 1, max_len do
+		local ai = a_ids[i]
+		local bi = b_ids[i]
+		if ai == nil then return -1 end
+		if bi == nil then return 1 end
+
+		local an = tonumber(ai)
+		local bn = tonumber(bi)
+		if an and bn then
+			if an ~= bn then
+				return an > bn and 1 or -1
+			end
+		elseif an and not bn then
+			return -1
+		elseif not an and bn then
+			return 1
+		elseif ai ~= bi then
+			return ai > bi and 1 or -1
+		end
+	end
+
+	return 0
 end
 
 local function require_csrf()
@@ -353,6 +426,46 @@ local function get_pid_uptime_human(pid)
 	return fmt_elapsed(elapsed)
 end
 
+local function probe_gateway_ready(port, base_dir, bind)
+	local sys = require "luci.sys"
+	local util = require "luci.util"
+
+	if not port or not tostring(port):match("^%d+$") then
+		return false, "", ""
+	end
+	if not base_dir or base_dir == "" then
+		return false, "", ""
+	end
+
+	local base_path = configured_base_path(base_dir)
+	local candidates = {}
+
+	if bind == "lan" or bind == "auto" then
+		local ip = lan_ipv4()
+		if ip ~= "" then
+			candidates[#candidates + 1] = ip
+		end
+	end
+	candidates[#candidates + 1] = "127.0.0.1"
+
+	local last_code, last_url = "", ""
+	for _, host in ipairs(candidates) do
+		local url = "http://" .. host .. ":" .. port .. base_path
+		last_url = url
+		local cmd = string.format(
+			"curl -fsS -o /dev/null --connect-timeout 1 --max-time 2 -w '%%{http_code}' %s 2>/dev/null",
+			util.shellquote(url)
+		)
+		local code = sys.exec(cmd):gsub("%s+$", "")
+		last_code = code
+		local n = tonumber(code) or 0
+		if n >= 200 and n < 400 then
+			return true, code, url
+		end
+	end
+	return false, last_code, last_url
+end
+
 function action_status()
 	local sys = require "luci.sys"
 	local uci = require "luci.model.uci".cursor()
@@ -372,6 +485,11 @@ function action_status()
 		local st = sys.exec("/usr/libexec/istorec/openclawmgr.sh status 2>/dev/null"):gsub("%s+$", "")
 		running = (st == "running")
 		installed = (st == "running" or st == "stopped")
+	end
+
+	local reachable, reachable_code, reachable_url = false, "", ""
+	if installed and not running then
+		reachable, reachable_code, reachable_url = probe_gateway_ready(port, base_dir, bind)
 	end
 	local lock_running, lock_pid = installer_lock_running()
 	local installing = (task.running and (task.op == "install" or task.op == "upgrade")) or lock_running
@@ -405,6 +523,9 @@ function action_status()
 		enabled = enabled,
 		installed = installed,
 		running = running,
+		reachable = reachable,
+		reachable_http_code = reachable_code,
+		reachable_url = reachable_url,
 		task_running = task.running,
 		task_op = task.op,
 		installing = installing,
@@ -423,11 +544,10 @@ function action_status()
 end
 
 function action_ready()
-	local sys = require "luci.sys"
-	local util = require "luci.util"
 	local uci = require "luci.model.uci".cursor()
 
 	local port = uci:get("openclawmgr", "main", "port") or "18789"
+	local bind = uci:get("openclawmgr", "main", "bind") or "lan"
 	local base_dir = uci:get("openclawmgr", "main", "base_dir") or ""
 
 	if not port:match("^%d+$") then port = "18789" end
@@ -437,20 +557,66 @@ function action_ready()
 		return
 	end
 
-	local base_url = "http://127.0.0.1:" .. port .. configured_base_path(base_dir)
-	local cmd = string.format(
-		"curl -fsS -o /dev/null --connect-timeout 1 --max-time 2 -w '%%{http_code}' %s 2>/dev/null",
-		util.shellquote(base_url)
-	)
-	local code = sys.exec(cmd):gsub("%s+$", "")
-	local n = tonumber(code) or 0
-	local ready = (n >= 200 and n < 400)
+	local ready, code, url = probe_gateway_ready(port, base_dir, bind)
 
 	write_json({
 		ok = true,
 		ready = ready,
 		http_code = code,
-		url = base_url,
+		url = url,
+	})
+end
+
+function action_check_update()
+	local sys = require "luci.sys"
+	local uci = require "luci.model.uci".cursor()
+
+	if not require_csrf() then
+		return
+	end
+
+	local base_dir = uci:get("openclawmgr", "main", "base_dir") or ""
+	if trim(base_dir) == "" then
+		write_json({ ok = false, error = "请先配置数据目录" })
+		return
+	end
+
+	local st = trim(sys.exec("/usr/libexec/istorec/openclawmgr.sh status 2>/dev/null"))
+	local installed = (st == "running" or st == "stopped")
+	if not installed then
+		write_json({ ok = false, error = "OpenClaw 尚未安装", installed = false })
+		return
+	end
+
+	local local_ver = trim(sys.exec("/usr/libexec/istorec/openclawmgr.sh local_openclaw_version 2>/dev/null"))
+	if local_ver == "" then
+		local_ver = trim(sys.exec("/usr/libexec/istorec/openclawmgr.sh openclaw_version 2>/dev/null"))
+	end
+	if local_ver == "" then
+		write_json({ ok = false, error = "获取本地版本失败", installed = true })
+		return
+	end
+
+	local remote_ver = trim(sys.exec("/usr/libexec/istorec/openclawmgr.sh latest_openclaw_version 2>/dev/null"))
+	if remote_ver == "" then
+		write_json({ ok = false, error = "获取远程版本失败", installed = true, local_version = local_ver })
+		return
+	end
+
+	local cmp = semver_compare(remote_ver, local_ver)
+	local has_update = false
+	if cmp == nil then
+		has_update = remote_ver ~= local_ver
+	else
+		has_update = cmp > 0
+	end
+
+	write_json({
+		ok = true,
+		installed = true,
+		local_version = local_ver,
+		remote_version = remote_ver,
+		has_update = has_update,
 	})
 end
 
