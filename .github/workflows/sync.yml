@@ -22,7 +22,7 @@ jobs:
               {
                 "luci-app-argon-config": "https://github.com/jerrykuku/luci-app-argon-config",
                 "luci-theme-argon": "https://github.com/jerrykuku/luci-theme-argon",
-                "luci-theme-neobird": "https://github.com/thinktip/luci-theme-neobird",
+                "luci-theme-design": "https://github.com/papagaye744/luci-theme-design",
                 "luci-app-lucky": "https://github.com/sirpdboy/luci-app-lucky",
                 "luci-app-mosdns": "https://github.com/sbwml/luci-app-mosdns",
                 "luci-app-filebrowser": "https://github.com/Lienol/openwrt-package",
@@ -39,9 +39,7 @@ jobs:
                 "luci-app-unishare": "https://github.com/linkease/nas-packages-luci",
                 "unishare": "https://github.com/linkease/nas-packages",
                 "webdav2": "https://github.com/linkease/nas-packages",
-                "luci-app-tailscale": "https://github.com/asvow/luci-app-tailscale",
-                "luci-app-wolplus": "https://github.com/animegasan/luci-app-wolplus",
-                "luci-app-netwizard": "https://github.com/sirpdboy/luci-app-netwizard"
+                "luci-app-tailscale": "https://github.com/asvow/luci-app-tailscale"
               }
             subdirs: |
               {
@@ -57,7 +55,6 @@ jobs:
                 "luci-app-gowebdav": "luci-app-gowebdav",
                 "luci-app-unishare": "luci/luci-app-unishare",
                 "unishare": "network/services/unishare",
-                "luci-app-netwizard": "luci-app-netwizard",
                 "webdav2": "network/services/webdav2"
               }
     env:
