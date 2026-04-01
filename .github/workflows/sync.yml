@@ -31,7 +31,6 @@ jobs:
                 "luci-app-quickstart": "https://github.com/db-one/dbone-packages 23.05",
                 "luci-app-openclash": "https://github.com/vernesong/OpenClash",
                 "luci-app-oaf": "https://github.com/db-one/dbone-packages 23.05",
-                "luci-app-dockerman": "https://github.com/kenzok8/jell",
                 "luci-app-easytier": "https://github.com/EasyTier/luci-app-easytier",
                 "taskd": "https://github.com/db-one/dbone-packages 23.05",
                 "gowebdav": "https://github.com/linkease/istore-packages",
