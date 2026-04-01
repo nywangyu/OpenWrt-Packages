@@ -8,7 +8,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=qt6tools
 PKG_VERSION:=6.10.2
-PKG_RELEASE:=35
+PKG_RELEASE:=41
 
 PKG_SOURCE:=qttools-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/qt/qttools/tar.gz/v$(PKG_VERSION)?
