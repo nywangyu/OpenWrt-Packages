@@ -42,7 +42,6 @@ jobs:
               }
             subdirs: |
               {
-                "luci-app-lucky": "luci-app-lucky",
                 "quickstart": "network/services/quickstart",
                 "luci-app-quickstart": "luci/luci-app-quickstart",
                 "luci-app-openclash": "luci-app-openclash",
