@@ -1,6 +1,5 @@
 gowebdav b80a51784857bb95ffe4cf9cd99ffa2458e909c6
 quickstart 694d14da3022ac5e56d2041980a1a87df72f7a3a
-luci-app-nikki 6517464fb2f03b4d25e287efee746d390098e997
 luci-app-argon-config 2ddae597f994f8a49358f8dfd03b7e6a732aae63
 luci-app-mosdns be55282103fbfed647502e1a174976329b5e8bdd
 luci-app-gowebdav b80a51784857bb95ffe4cf9cd99ffa2458e909c6
@@ -13,7 +12,8 @@ luci-app-store a4a02e700e7840ba0d01cc5677a36257864291c8
 unishare 694d14da3022ac5e56d2041980a1a87df72f7a3a
 webdav2 694d14da3022ac5e56d2041980a1a87df72f7a3a
 luci-theme-argon 7aba78ccb84297496f63e1dacefe64c89d83d72e
+OpenWrt-nikki e30ee6d721f733db706c745cacf7d2212d06c775
 luci-app-quickstart c546d79ee4cdebcf27a2cc93ecd6588697d0095c
 luci-app-filebrowser 8da3782f69292fff3bebb2491f246feb35c464f2
 luci-app-unishare c546d79ee4cdebcf27a2cc93ecd6588697d0095c
-luci-app-oaf 5cd40cf9de840d4d8422458451ba08df8345e6b9
+luci-app-oaf 72fe47d4018ab548a30a79bfd2ab039f44534ac7
