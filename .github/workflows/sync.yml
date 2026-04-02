@@ -26,7 +26,7 @@ jobs:
                 "luci-app-lucky": "https://github.com/sirpdboy/luci-app-lucky",
                 "luci-app-mosdns": "https://github.com/sbwml/luci-app-mosdns",
                 "luci-app-filebrowser": "https://github.com/Lienol/openwrt-package",
-                "luci-app-nikki": "https://github.com/nikkinikki-org/OpenWrt-nikki",
+                "OpenWrt-nikki": "https://github.com/nikkinikki-org/OpenWrt-nikki",
                 "luci-app-store": "https://github.com/linkease/istore main",
                 "quickstart": "https://github.com/linkease/nas-packages",
                 "luci-app-quickstart": "https://github.com/linkease/nas-packages-luci",
