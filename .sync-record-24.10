@@ -6,7 +6,6 @@ luci-app-gowebdav b80a51784857bb95ffe4cf9cd99ffa2458e909c6
 luci-theme-design 3cc888cc1a41e237f6869607861b77d894a3f8f4
 luci-app-easytier cdd0543a12862ffacc62263df0d0878bd9dc4a0f
 luci-app-tailscale 534eb3f3acba24dac4e6fee9fa33049b004ef121
-luci-app-lucky 31f068051de9798c0fb8f3e1d8e32310b4063e5d
 luci-app-openclash a4c2052d392695a7a11685957a751e940a1886e1
 luci-app-store a4a02e700e7840ba0d01cc5677a36257864291c8
 unishare 694d14da3022ac5e56d2041980a1a87df72f7a3a
