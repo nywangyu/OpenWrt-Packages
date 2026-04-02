@@ -16,4 +16,4 @@ OpenWrt-nikki e30ee6d721f733db706c745cacf7d2212d06c775
 luci-app-quickstart c546d79ee4cdebcf27a2cc93ecd6588697d0095c
 luci-app-filebrowser 8da3782f69292fff3bebb2491f246feb35c464f2
 luci-app-unishare c546d79ee4cdebcf27a2cc93ecd6588697d0095c
-luci-app-oaf 72fe47d4018ab548a30a79bfd2ab039f44534ac7
+luci-app-oaf febadea2eaf3306feb309580e64289d1f76eb651
