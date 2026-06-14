@@ -21,13 +21,15 @@ jobs:
             repos: |
               {
                 "luci-app-argon-config": "https://github.com/jerrykuku/luci-app-argon-config",
+                "luci-app-aurora-config": "https://github.com/eamonxg/luci-app-aurora-config",
                 "luci-theme-argon": "https://github.com/jerrykuku/luci-theme-argon",
+                "luci-theme-aurora": "https://github.com/eamonxg/luci-theme-aurora",
                 "luci-theme-design": "https://github.com/papagaye744/luci-theme-design",
                 "luci-app-lucky": "https://github.com/sirpdboy/luci-app-lucky",
                 "luci-app-mosdns": "https://github.com/sbwml/luci-app-mosdns",
                 "luci-app-filebrowser": "https://github.com/Lienol/openwrt-package",
                 "OpenWrt-nikki": "https://github.com/nikkinikki-org/OpenWrt-nikki",
-                "luci-app-store": "https://github.com/linkease/istore main",
+                "luci-app-store": "https://github.com/linkease/istore dev/apk",
                 "quickstart": "https://github.com/linkease/nas-packages",
                 "luci-app-quickstart": "https://github.com/linkease/nas-packages-luci",
                 "luci-app-openclash": "https://github.com/vernesong/OpenClash",
