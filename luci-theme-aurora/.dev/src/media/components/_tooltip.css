@@ -1,0 +1,28 @@
+.cbi-tooltip {
+  @apply bg-tooltip-bg text-content border-border-subtle absolute z-110 max-w-xs scale-95 rounded-xl border px-3 py-2 text-xs break-normal whitespace-normal opacity-0 shadow-lg transition-[visibility,opacity,scale] duration-150 ease-out;
+  &.error {
+    @apply border-danger-border bg-danger-surface text-danger-content;
+  }
+  &.success {
+    @apply border-success-border bg-success-surface text-success-content;
+  }
+  &.info {
+    @apply border-info-border bg-info-surface text-info-content;
+  }
+  &.notice {
+    @apply border-warning-border bg-warning-surface text-warning-content;
+  }
+}
+
+.cbi-tooltip-container,
+[data-tooltip] {
+  @apply relative inline-block cursor-help whitespace-nowrap underline decoration-current decoration-dotted underline-offset-2;
+
+  & .cbi-tooltip {
+    @apply invisible scale-95 opacity-0 transition-[visibility,opacity,scale] duration-150 ease-out;
+  }
+
+  &:hover .cbi-tooltip {
+    @apply visible scale-100 opacity-100;
+  }
+}
