@@ -10,16 +10,21 @@ if [ "${action:0:9}" = "AUTOCONF=" ]; then
 fi
 
 IS_ROOT=/tmp/is-root
+TMP_SELF_COPY=/var/run/cloned-is-opkg
 USE_APK=false
 DISABLE_MIRROR=false
-[[ -s /etc/apk/arch ]] && USE_APK=true
+if [[ -s /etc/apk/arch ]]; then
+    USE_APK=true
+fi
 
 if $USE_APK; then
     LISTS_DIR=${IS_ROOT}/apk
     APK_CONF=${IS_ROOT}/etc/apk.conf
-    FEEDS_SERVER=https://istore.istoreos.com/apk
-    FEEDS_SERVER_MIRRORS="https://repo.istoreos.com/apk"
+    FEEDS_SERVER=https://istore.istoreos.com/repo-apk
+    FEEDS_SERVER_MIRRORS="https://repo.istoreos.com/repo-apk"
     ISTORE_INDEX=$FEEDS_SERVER/all/store/packages.adb
+    META_DIR=/lib/apk
+
     ARCH=`cat /rom/etc/apk/arch /etc/apk/arch 2>/dev/null | head -1`
 else
     LISTS_DIR_O=/tmp/opkg-lists
@@ -29,6 +34,7 @@ else
     FEEDS_SERVER=https://istore.istoreos.com/repo
     FEEDS_SERVER_MIRRORS="https://repo.istoreos.com/repo"
     ISTORE_INDEX=$FEEDS_SERVER/all/store/Packages.gz
+    META_DIR=/usr/lib/opkg
 
     ARCH=`sed -n -e 's/^Architecture: *\([^ ]\+\) *$/\1/p' /rom/usr/lib/opkg/info/libc.control /usr/lib/opkg/info/libc.control 2>/dev/null | head -1`
 fi
@@ -88,7 +94,7 @@ simple_apk_opkg() {
 do_in_mirrors() {
     local server
     if ! $DISABLE_MIRROR; then
-        local newpath="/usr/libexec/istore/apk-bin:$PATH"
+        local newpath="/usr/libexec/istore/mirror-bin:$PATH"
         for server in $FEEDS_SERVER_MIRRORS ; do
             echo "Try mirror server $server"
             PATH="$newpath" IS_ORIG_SERVER=$FEEDS_SERVER IS_MIRROR_SERVER=$server "$@" && return 0
@@ -143,7 +149,7 @@ update() {
 
     echo "Fetch feed list for ${ARCH}"
     if $USE_APK; then
-        rm -rf ${IS_ROOT}/var/tmp ${IS_ROOT}/etc/arch
+        rm -rf ${IS_ROOT}/var/tmp ${IS_ROOT}/etc/arch ${IS_ROOT}/etc/istore.pem
         mkdir -p ${IS_ROOT}/var/tmp
         fcurl --no-progress-meter -o ${IS_ROOT}/var/tmp/meta.conf "${FEEDS_SERVER}/all/meta.conf" && \
           fcurl --no-progress-meter -o ${IS_ROOT}/var/tmp/all.conf "${FEEDS_SERVER}/all/isfeeds.conf" && \
@@ -158,6 +164,12 @@ update() {
                 grep -Fxq "$line" /etc/apk/arch || echo "$line" >> /etc/apk/arch
             fi
         done < ${IS_ROOT}/etc/arch
+        sync /etc/apk/arch
+        if [[ ! -s /etc/apk/keys/istore.pem && ! -s /etc/apk/keys/istore-tmp.pem ]]; then
+            fcurl --no-progress-meter -o ${IS_ROOT}/etc/istore.pem "${FEEDS_SERVER}/istore-apk.pem" && \
+              cp -a ${IS_ROOT}/etc/istore.pem /etc/apk/keys/istore-tmp.pem || \
+              return 1
+        fi
     else
         fcurl --no-progress-meter -o ${OPKG_CONF_DIR}/meta.conf "${FEEDS_SERVER}/all/meta.conf" && \
           fcurl --no-progress-meter -o ${OPKG_CONF_DIR}/all.conf "${FEEDS_SERVER}/all/isfeeds.conf" && \
@@ -263,7 +275,7 @@ refresh_installed() {
     local pkg
     for pkg in $@; do
         [[ $pkg == app-meta-* ]] || continue
-        pkg="/usr/lib/opkg/meta/${pkg#app-meta-}.json"
+        pkg="$META_DIR/meta/${pkg#app-meta-}.json"
         [[ -f "$pkg" ]] && touch "$pkg"
     done
     return 0
@@ -355,7 +367,7 @@ try_upgrade_depends() {
 
 if $USE_APK; then
     CMD_INSTALLED="apk --repositories-file /dev/null info | cut -d' ' -f1 | sort -u"
-    CMD_INSTALL="apk add"
+    CMD_INSTALL="apk add --allow-untrusted"
 else
     CMD_INSTALLED="opkg list-installed | cut -d' ' -f1 | sort -u"
     CMD_INSTALL="opkg install"
@@ -468,6 +480,12 @@ usage() {
     exit 1
 }
 
+if [[ "$action" = "do_self_upgrade" && "$0" != "$TMP_SELF_COPY" ]]; then
+    echo "copy self $0 to $TMP_SELF_COPY when self upgrade"
+    cp -af "$0" "$TMP_SELF_COPY" || exit 1
+    exec "$TMP_SELF_COPY" do_self_upgrade "$@" || exit 1
+fi
+
 is_init >/dev/null 2>&1
 
 CLEANPATH="$PATH"
@@ -535,6 +553,11 @@ case $action in
     ;;
     "unrun")
         unrun "$1"
+    ;;
+    "link_meta")
+        [[ -d "$META_DIR/meta" ]] || mkdir -p "$META_DIR/meta"
+        mkdir -p /tmp/run/istore
+        ln -sf "$META_DIR" /tmp/run/istore-meta
     ;;
     *)
         usage
