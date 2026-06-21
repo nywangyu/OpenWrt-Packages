@@ -26,7 +26,7 @@ jobs:
                 "luci-theme-aurora": "https://github.com/eamonxg/luci-theme-aurora",
                 "luci-theme-design": "https://github.com/papagaye744/luci-theme-design",
                 "luci-app-lucky": "https://github.com/sirpdboy/luci-app-lucky",
-                "mosdns": "https://github.com/sbwml/luci-app-mosdns -b v5",
+                "mosdns": "https://github.com/sbwml/luci-app-mosdns v5",
                 "v2ray-geodata": "https://github.com/sbwml/v2ray-geodata",
                 "luci-app-filebrowser": "https://github.com/Lienol/openwrt-package",
                 "OpenWrt-nikki": "https://github.com/nikkinikki-org/OpenWrt-nikki",
