@@ -35,7 +35,7 @@ const toRuntimeColor = (value) =>
 // semantics, so these are the accent colours, not surfaces.
 const STATUS = {
   light: {
-    info: "oklch(0.43 0.2 255)",
+    info: "oklch(0.45 0.12 255)",
     warning: "oklch(0.35 0.08 60)",
     success: "oklch(0.32 0.09 165)",
     danger: "oklch(0.35 0.12 25)",
@@ -51,7 +51,7 @@ const STATUS = {
 // canvas -> bg, content -> text; the old surface_raised (panel colour) becomes
 // the new single `surface`. on_brand is per-preset.
 const PRESETS = {
-  classic: {
+  default: {
     light: {
       bg: "oklch(0.967 0.003 264)",
       surface: "oklch(1 0 0)",
@@ -154,12 +154,23 @@ const PRESETS = {
 };
 
 // Stable emission order: inputs first, then derived.
-const KEY_ORDER = Object.keys(resolveTokens("light", PRESETS.classic.light));
+const KEY_ORDER = Object.keys(resolveTokens("light", PRESETS.default.light));
 
 const colorLines = (preset) => {
   const lines = [];
   for (const mode of ["light", "dark"]) {
-    const resolved = resolveTokens(mode, PRESETS[preset][mode]);
+    // Round the 10 editable inputs to hex FIRST, then derive from those rounded
+    // inputs. The config UI loads inputs as hex and recomputes the derived
+    // tokens from them to decide "automatic vs user-override" (see
+    // syncDerivedInitialState in view/aurora/theme.js). Seeding derived values
+    // from full-precision oklch makes ~30 tokens (e.g. brand_hover) disagree
+    // with that recompute by a single 8-bit step, so a clean preset misreads
+    // them as manual overrides and shows a value in the input box. Deriving
+    // from the same hex the browser sees keeps stored == recomputed.
+    const hexInputs = {};
+    for (const key of INPUTS)
+      hexInputs[key] = toRuntimeColor(PRESETS[preset][mode][key]);
+    const resolved = resolveTokens(mode, hexInputs);
     for (const key of KEY_ORDER) {
       lines.push(`\toption ${mode}_${key} '${toRuntimeColor(resolved[key])}'`);
     }
@@ -170,7 +181,9 @@ const colorLines = (preset) => {
 const isColorOptionLine = (line) => /^\toption (light|dark)_/.test(line);
 
 for (const preset of Object.keys(PRESETS)) {
-  const path = resolve(PRESET_DIR, `${preset}.template`);
+  const templateFile =
+    preset === "default" ? "default.template" : `${preset}.template`;
+  const path = resolve(PRESET_DIR, templateFile);
   const lines = readFileSync(path, "utf8").split("\n");
   const out = [];
   let injected = false;
@@ -186,5 +199,5 @@ for (const preset of Object.keys(PRESETS)) {
   }
   if (!injected) throw new Error(`${preset}: no colour block found to replace`);
   writeFileSync(path, out.join("\n"), "utf8");
-  console.log(`gen-presets: wrote ${preset}.template`);
+  console.log(`gen-presets: wrote ${templateFile}`);
 }
