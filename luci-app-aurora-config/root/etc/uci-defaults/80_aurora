@@ -29,10 +29,46 @@ readonly LOG_TAG="aurora"
 #     wholesale with the active template. ALL prior customisation (colours,
 #     fonts, toolbar items, nav mode, icon, logo/favicon) is discarded so every
 #     upgraded device lands on the new defaults.
-readonly SCHEMA_VERSION="5"
+# v6: link now defaults to the brand colour in both modes (aurora-tokens
+#     1.0.1). Seeded v5 snapshots still carry the legacy magenta/teal link,
+#     which header.ut would keep injecting over the new CSS defaults; per the
+#     v5 policy the mismatch triggers a full reset to the active template.
+# v7: light-mode relight to the "snow x blue hour" palette (aurora-tokens
+#     1.1.0, refined in 1.2.x: icy recessed fills, snow panel, control_bg
+#     + app_opacity_disabled): cool 235deg neutrals, purified status hues
+#     and a cool blue-black menu scrim. Seeded v6 snapshots carry the old
+#     264deg purple-grey light tokens, which header.ut would keep injecting
+#     over the new CSS defaults; per the v5 policy the mismatch triggers a
+#     full reset to the active template.
+readonly SCHEMA_VERSION="7"
 
 log() {
     logger -t "$LOG_TAG" "$1"
+}
+
+# Rename struct_container_max_width -> struct_content_width_centered, in place.
+#
+# Deliberately NOT a SCHEMA_VERSION bump: that triggers a full reset to the
+# template (see the v5 policy above) and is reserved for incompatible *colour*
+# semantics. A rename changes no meaning, so discarding every other
+# customisation to accomplish it would be gratuitous.
+#
+# The width cap only ever applied to the centred (top-bar) layouts — the
+# sidebar shell runs full-width — so the key was renamed to say which shell it
+# governs. The old key must be deleted, not merely copied: header.ut re-emits
+# every stored struct_* key as a CSS custom property, so leaving it behind would
+# keep injecting a --container-max-width that nothing reads.
+migrate_structure_keys() {
+    local old
+
+    old=$(uci -q get aurora.theme.struct_container_max_width)
+    [ -n "$old" ] || return 0
+
+    [ -n "$(uci -q get aurora.theme.struct_content_width_centered)" ] ||
+        uci -q set aurora.theme.struct_content_width_centered="$old"
+    uci -q delete aurora.theme.struct_container_max_width
+    uci -q commit aurora
+    log "Renamed struct_container_max_width -> struct_content_width_centered (${old})"
 }
 
 # Reset the whole config to the active template. Used when the stored schema
@@ -88,6 +124,9 @@ main() {
     else
         log "Configuration already exists, checking colour token schema"
         migrate_color_schema "$template"
+        # After a reset the config already matches the template, so this is a
+        # no-op; it only does work for configs that survived the check above.
+        migrate_structure_keys
     fi
 }
 

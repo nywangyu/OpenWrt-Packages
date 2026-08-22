@@ -2,6 +2,8 @@
 "require baseclass";
 "require ui";
 
+const PALETTE_RECENTS_KEY = "aurora.paletteRecents";
+
 return baseclass.extend({
   __init__() {
     ui.menu.load().then((tree) => this.render(tree));
@@ -30,6 +32,7 @@ return baseclass.extend({
     const mobileList = overlay.querySelector("#mobile-nav-list");
     const desktop = window.matchMedia("(min-width: 768px)");
     const SIDEBAR_COLLAPSED_KEY = "aurora.sidebarCollapsed";
+    let sidebarAnimTimer;
 
     const isDesktopSidebar = () =>
       desktop.matches && document.body.dataset.navType === "sidebar";
@@ -60,11 +63,14 @@ return baseclass.extend({
     };
 
     const closeMobileNavigation = () => {
+      if (!overlay.classList.contains("mobile-menu-open")) return;
       overlay.classList.remove("mobile-menu-open");
       document.body.classList.remove("mobile-navigation-open");
       document.body.style.overflow = "";
       this.resetNavigationGroups(mobileList);
+      updateToggleState(false);
     };
+    this.closeMobileNavigation = closeMobileNavigation;
 
     const getNavigationExpanded = () => {
       if (isDesktopSidebar()) {
@@ -79,7 +85,23 @@ return baseclass.extend({
         closeMobileNavigation();
 
         const collapsed = !expanded;
-        document.body.classList.toggle("sidebar-collapsed", collapsed);
+        const body = document.body;
+
+        // Coupled slide (_layout.css): the class must land in the same
+        // frame as the column snap. Open/close carry distinct
+        // animation-names, so alternating toggles restart the run without
+        // a forced reflow; the timer (not animationend — three elements
+        // animate) clears the class once the 250ms run is over.
+        body.classList.remove("sidebar-anim-open", "sidebar-anim-close");
+        body.classList.add(
+          collapsed ? "sidebar-anim-close" : "sidebar-anim-open",
+        );
+        clearTimeout(sidebarAnimTimer);
+        sidebarAnimTimer = setTimeout(() => {
+          body.classList.remove("sidebar-anim-open", "sidebar-anim-close");
+        }, 300);
+
+        body.classList.toggle("sidebar-collapsed", collapsed);
         localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed);
         updateToggleState(expanded);
         return;
@@ -178,20 +200,78 @@ return baseclass.extend({
   },
 
   render(tree) {
+    this.tree = tree;
     this.renderModeMenu(tree);
+    this.renderTabs(tree);
+  },
 
-    if (L.env.dispatchpath.length >= 3) {
-      let node = tree;
-      let url = "";
+  renderTabs(tree) {
+    if (L.env.dispatchpath.length < 3) return;
 
-      for (let i = 0; i < 3 && node; i++) {
-        const segment = L.env.dispatchpath[i];
-        node = node.children?.[segment];
-        url += (url ? "/" : "") + segment;
-      }
+    let node = tree;
+    let url = "";
 
-      if (node) this.renderTabMenu(node, url);
+    for (let i = 0; i < 3 && node; i++) {
+      const segment = L.env.dispatchpath[i];
+      node = node.children?.[segment];
+      url += (url ? "/" : "") + segment;
     }
+
+    if (node) this.renderTabMenu(node, url);
+  },
+
+  // Re-marks every nav surface from L.env after a same-document navigation
+  // (router-aurora.js). Menus keep their DOM and listeners; only state moves.
+  syncRoute() {
+    if (!this.tree) return;
+
+    const activeHref = new URL(
+      L.url(...L.env.dispatchpath.slice(0, 3)),
+      location.href,
+    ).pathname;
+
+    document
+      .querySelectorAll(
+        "#topmenu a, .desktop-menu-canvas a, #sidebar-list a, #mobile-nav-list a",
+      )
+      .forEach((a) => {
+        const active =
+          a.pathname === activeHref && !a.getAttribute("href").startsWith("#");
+        a.classList.toggle("is-active-page", active);
+        if (active) a.setAttribute("aria-current", "page");
+        else a.removeAttribute("aria-current");
+      });
+
+    document.querySelectorAll(".navigation-group").forEach((group) => {
+      const active = !!group.querySelector("a.is-active-page");
+      const toggle = group.querySelector(".navigation-group-toggle");
+      group.classList.toggle("is-active-group", active);
+      if (active) toggle?.setAttribute("aria-current", "location");
+      else toggle?.removeAttribute("aria-current");
+    });
+
+    for (const surface of [
+      document.querySelector("#sidebar-list"),
+      document.querySelector("#mobile-nav-list"),
+    ]) {
+      this.resetNavigationGroups(surface);
+      this.expandActiveNavigationGroup(surface);
+    }
+
+    this.renderCrumb();
+
+    const tabs = document.querySelector("#tabmenu");
+    if (tabs) {
+      tabs.innerHTML = "";
+      tabs.style.display = "none";
+    }
+    this.renderTabs(this.tree);
+  },
+
+  closeSurfaces() {
+    this.hideDesktopNav();
+    if (this.paletteList) this.closePalette();
+    this.closeMobileNavigation?.();
   },
 
   renderTabMenu(tree, url, level = 0) {
@@ -328,7 +408,15 @@ return baseclass.extend({
         href: item.href,
       };
       if (item.isActivePage) attributes["aria-current"] = "page";
-      return E("li", { class: itemClass }, [E("a", attributes, [item.title])]);
+      // data-section keys the shared name → icon map (_nav.css); the icon
+      // span renders it, unmapped names fall back at the consumer.
+      attributes["data-section"] = item.name;
+      return E("li", { class: itemClass }, [
+        E("a", attributes, [
+          E("span", { class: "nav-icon", "aria-hidden": "true" }),
+          E("span", { class: "nav-label" }, [item.title]),
+        ]),
+      ]);
     }
 
     const submenuId = this.navigationSubmenuId(mode, item.name);
@@ -347,6 +435,8 @@ return baseclass.extend({
       "aria-controls": submenuId,
     };
     if (item.isActiveGroup) toggleAttributes["aria-current"] = "location";
+    // See the direct-row note: keys the shared icon map.
+    toggleAttributes["data-section"] = item.name;
 
     const list = E("ul", {
       class: mobile
@@ -383,6 +473,7 @@ return baseclass.extend({
 
     return E("li", { class: groupClasses.join(" ") }, [
       E("button", toggleAttributes, [
+        E("span", { class: "nav-icon", "aria-hidden": "true" }),
         E("span", { class: "nav-category-label" }, [item.title]),
       ]),
       E("div", regionAttributes, [list]),
@@ -456,22 +547,13 @@ return baseclass.extend({
   renderSidebar(items) {
     const list = document.querySelector("#sidebar-list");
     const footer = document.querySelector("#sidebar-footer");
-    const crumbEl = document.querySelector("#header-crumb");
 
     if (list) list.innerHTML = "";
     if (footer) footer.innerHTML = "";
-    if (crumbEl) crumbEl.innerHTML = "";
 
     if (!list) return;
 
-    const crumb = [];
-
     items.forEach((item) => {
-      if (item.isActiveGroup || item.isActivePage) {
-        crumb.push(item.title);
-        if (item.activePage) crumb.push(item.activePage.title);
-      }
-
       if (item.isLogout) {
         (footer || list).appendChild(
           E("a", { class: "nav-link", href: item.href }, [item.title]),
@@ -483,13 +565,536 @@ return baseclass.extend({
     });
 
     this.bindNavigationAccordion(list);
+    this.renderCrumb();
+  },
 
+  renderCrumb() {
+    const crumbEl = document.querySelector("#header-crumb");
+    const list = document.querySelector("#sidebar-list");
+    if (!crumbEl || !list) return;
+
+    const crumb = [];
+    const group = list.querySelector(".is-active-group");
+    const page = list.querySelector(".is-active-page");
+    if (group)
+      crumb.push(group.querySelector(".nav-category-label")?.textContent);
+    // Same-named group/page pairs ("System › System") collapse to one
+    // level — the duplicate adds no information.
+    if (page && page.textContent !== crumb[0]) crumb.push(page.textContent);
+
+    crumbEl.innerHTML = "";
     crumb.forEach((title, i) => {
-      if (i) crumbEl?.appendChild(E("li", { class: "crumb-sep" }, ["/"]));
-      crumbEl?.appendChild(
+      if (i) crumbEl.appendChild(E("li", { class: "crumb-sep" }, ["/"]));
+      crumbEl.appendChild(
         E("li", { class: i === crumb.length - 1 ? "current" : "" }, [title]),
       );
     });
+  },
+
+  // Command palette (all nav types): a Spotlight-style panel on ⌘K / Ctrl+K
+  // or the header trigger, holding routes and theme-mode commands. The index
+  // is the navigation model the menus already render from — no extra
+  // requests, no DOM scraping — and the panel DOM is built lazily on first
+  // open, so pages where it is never used pay nothing beyond this flat array.
+  initPalette(items) {
+    const toggle = document.querySelector("#cmdk-trigger");
+    if (!toggle || this.paletteIndex) return;
+
+    this.paletteIndex = [];
+    let logout = null;
+    items.forEach((item) => {
+      if (item.isLogout) {
+        logout = item;
+        return;
+      }
+      if (!item.hasChildren) {
+        this.paletteIndex.push({
+          title: item.title,
+          name: item.name,
+          group: null,
+          href: item.href,
+        });
+        return;
+      }
+      item.pages.forEach((page) =>
+        this.paletteIndex.push({
+          title: page.title,
+          // Section-qualified: "status/overview" keeps English dispatch
+          // segments matchable under any UI language, and the "/" is what
+          // arms the scorer's segment-start bonus.
+          name: `${item.name}/${page.name}`,
+          group: item.title,
+          href: page.href,
+        }),
+      );
+    });
+
+    // The only non-navigation commands: theme modes. They ride the same
+    // index — matched and rendered like pages, grouped under _("Design")
+    // (the System → Language and Style label) — but execute header.ut's
+    // global setTheme() instead of navigating, so the panel stays open and
+    // previews the switch live. luci-base carries no mode msgids, so the
+    // labels borrow luci-app-aurora-config's already-translated "Light
+    // Mode"/"Dark Mode" — matching its msgids verbatim is what makes the
+    // palette follow the UI language wherever the config app is installed,
+    // and they fall back to English where it isn't.
+    [
+      ["light", _("Light Mode")],
+      ["dark", _("Dark Mode")],
+      ["device", _("Automatic")],
+    ].forEach(([mode, title]) =>
+      this.paletteIndex.push({
+        title,
+        name: `theme ${mode}`,
+        group: _("Design"),
+        mode,
+      }),
+    );
+
+    // Logout is a command, not a destination: it rides ">" only (last, after
+    // the modes), stays out of the plain browse list, and is never recorded
+    // as a recent — but a typed query still reaches it.
+    if (logout)
+      this.paletteIndex.push({
+        title: logout.title,
+        name: logout.name,
+        group: null,
+        href: logout.href,
+        isLogout: true,
+      });
+
+    // Only msgids that already exist in a shipped catalog (luci-base, or the
+    // config app's as above) are used — the theme intentionally ships no
+    // translations of its own.
+    const isMac = /Mac|iP(ad|hone|od)/.test(navigator.platform);
+    this.paletteKey = isMac ? "⌘K" : "Ctrl+K";
+    toggle.setAttribute("aria-keyshortcuts", isMac ? "Meta+K" : "Control+K");
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.addEventListener("click", () => this.togglePalette());
+    this.paletteTrigger = toggle;
+
+    document.addEventListener("keydown", (e) => {
+      // An IME swallows these keys while composing (Esc cancels the
+      // composition, not the panel); keyCode 229 covers engines that
+      // don't set isComposing on the trailing keydown.
+      if (e.isComposing || e.keyCode === 229) return;
+      // Platform-exact modifier — only the advertised shortcut, with every
+      // other modifier rejected so combinations like Ctrl+Cmd+K fall through.
+      // On macOS, Ctrl+K is kill-to-end-of-line in text fields and must keep
+      // working.
+      if (
+        (isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) &&
+        !e.altKey &&
+        !e.shiftKey &&
+        (e.key || "").toLowerCase() === "k"
+      ) {
+        e.preventDefault();
+        this.togglePalette();
+      } else if (
+        e.key === "Escape" &&
+        this.palettePanel &&
+        !this.palettePanel.hidden
+      ) {
+        this.closePalette();
+      }
+    });
+
+    // Registered only while the panel is open (see openPalette/closePalette).
+    this.onPaletteAway = (e) => {
+      if (!this.palettePanel.contains(e.target) && !toggle.contains(e.target))
+        this.closePalette();
+    };
+  },
+
+  buildPalette() {
+    // type=text, not search: WebKit's search variant draws its own clear
+    // glyph at its own weight, which reads foreign next to the theme's
+    // Tabler set (and Firefox draws none at all) — .cmdk-clear below is the
+    // themed replacement, matching luci-theme-shadcn's palette. The combobox
+    // wiring (with role=option rows) is what makes arrow-key selection
+    // audible to screen readers — visually it's CSS-only .is-selected.
+    const input = E("input", {
+      class: "cmdk-input",
+      type: "text",
+      enterkeyhint: "go",
+      placeholder: _("Type to filter…"),
+      "aria-label": _("Type to filter…"),
+      autocomplete: "off",
+      spellcheck: "false",
+      role: "combobox",
+      "aria-expanded": "true",
+      "aria-autocomplete": "list",
+      "aria-controls": "cmdk-list",
+    });
+    const results = E("div", {
+      class: "cmdk-list",
+      id: "cmdk-list",
+      role: "listbox",
+    });
+    // Visibility is CSS-only (:placeholder-shown on the input), so nothing
+    // here has to mirror the query state.
+    const clear = E("button", {
+      class: "cmdk-clear",
+      type: "button",
+      "aria-label": _("Clear"),
+    });
+    clear.addEventListener("click", () => {
+      input.value = "";
+      this.renderPaletteResults("");
+      input.focus();
+    });
+    // Mobile-only exit (the full-screen takeover leaves no outside to tap
+    // and touch devices have no Escape) — hidden on md+ via CSS.
+    const cancel = E("button", { class: "cmdk-cancel", type: "button" }, [
+      _("Cancel"),
+    ]);
+    cancel.addEventListener("click", () => this.closePalette());
+    const panel = E(
+      "div",
+      {
+        id: "cmdk-panel",
+        class: "cmdk-panel",
+        role: "dialog",
+        "aria-modal": "true",
+        "aria-label": _("Navigation"),
+        hidden: "",
+      },
+      [
+        E("div", { class: "cmdk-inputrow" }, [input, clear, cancel]),
+        results,
+        E("div", { class: "cmdk-footer" }, [
+          E("kbd", {}, ["↑↓"]),
+          E("kbd", {}, ["↵"]),
+          E("kbd", {}, [">"]),
+          E("kbd", {}, ["esc"]),
+          E("span", { class: "cmdk-hint-close" }, [
+            E("kbd", {}, [this.paletteKey]),
+          ]),
+        ]),
+      ],
+    );
+
+    input.addEventListener("input", () =>
+      this.renderPaletteResults(input.value),
+    );
+    input.addEventListener("keydown", (e) => {
+      // Mid-composition these keys belong to the IME: Enter commits the
+      // buffer (navigating away for pinyin users) and arrows move inside
+      // the candidate list, not the results.
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        this.movePaletteSelection(e.key === "ArrowDown" ? 1 : -1);
+      } else if (e.key === "Enter") {
+        results.querySelector(".is-selected")?.click();
+      }
+    });
+    // mousemove, not mouseover: scrollIntoView() slides rows under a
+    // stationary pointer, which fires mouseover and would snap the
+    // selection back to whatever the mouse happens to rest on.
+    results.addEventListener("mousemove", (e) => {
+      const row = e.target?.closest?.(".cmdk-row");
+      if (row && !row.classList.contains("is-selected"))
+        this.setPaletteSelection(row);
+    });
+    // Theme rows execute instead of navigate: hand the mode to header.ut's
+    // global setTheme/syncSwitchers, keep the panel open so the switch
+    // previews live, and re-render so the ✓ follows. Refocus the input —
+    // the clicked anchor is replaced by the re-render, which would strand
+    // focus on <body> with the dialog still open.
+    results.addEventListener("click", (e) => {
+      const row = e.target?.closest?.(".cmdk-row");
+      if (!row) return;
+      const mode = row.dataset.mode;
+      if (!mode) {
+        // Navigation rows: remember the pick, then let the click navigate
+        // (same-document router or full load) untouched.
+        if (row.dataset.name) this.recordPaletteRecent(row.dataset.name);
+        return;
+      }
+      e.preventDefault();
+      setTheme(mode);
+      syncSwitchers();
+      this.renderPaletteResults(input.value);
+      this.setPaletteSelection(results.querySelector(`[data-mode="${mode}"]`));
+      input.focus();
+    });
+    // The dialog is modal (full-screen takeover on mobile): keep Tab
+    // cycling within it instead of escaping onto the page beneath.
+    panel.addEventListener("keydown", (e) => {
+      if (e.key !== "Tab") return;
+      const focusables = [
+        input,
+        clear,
+        ...results.querySelectorAll("a"),
+        cancel,
+      ].filter((el) => el.getClientRects().length);
+      const edge = e.shiftKey ? focusables[0] : focusables.at(-1);
+      if (document.activeElement === edge) {
+        e.preventDefault();
+        (e.shiftKey ? focusables.at(-1) : focusables[0]).focus();
+      }
+    });
+
+    document.body.appendChild(panel);
+    this.paletteTrigger.setAttribute("aria-controls", panel.id);
+    this.palettePanel = panel;
+    this.paletteInput = input;
+    this.paletteList = results;
+  },
+
+  // Greedy left-to-right subsequence scorer: adjacency runs and word starts
+  // score up, longer targets score down. Retried from every occurrence of
+  // the query's first character — a single greedy pass would anchor "dns"
+  // to the first d of "Dhcp and dNS" and scatter, scoring it below shorter
+  // near-misses like "Diagnostics". Query arrives lowercased; spaces only
+  // reset the adjacency run.
+  fuzzyMatch(q, text) {
+    const low = String(text).toLowerCase();
+    let best = null;
+
+    for (
+      let from = low.indexOf(q[0]);
+      from >= 0;
+      from = low.indexOf(q[0], from + 1)
+    ) {
+      let ti = from;
+      let score = 0;
+      let run = 0;
+      const ranges = [];
+
+      for (const c of q) {
+        if (c === " ") {
+          run = 0;
+          continue;
+        }
+        const at = low.indexOf(c, ti);
+        if (at < 0) {
+          ranges.length = 0;
+          break;
+        }
+
+        run = at === ti && ranges.length ? run + 1 : 1;
+        score +=
+          1 +
+          run +
+          (at === ti && ranges.length ? 4 : 0) +
+          (at === 0 || low[at - 1] === " " || low[at - 1] === "/" ? 3 : 0);
+
+        // c is a code point, so it can be two UTF-16 units wide (emoji, CJK
+        // Ext-B); advancing by c.length keeps the ranges — which index the
+        // original string — from slicing a surrogate pair in half.
+        const end = at + c.length;
+        const last = ranges[ranges.length - 1];
+        if (last && last[1] === at) last[1] = end;
+        else ranges.push([at, end]);
+        ti = end;
+      }
+
+      score -= low.length * 0.02;
+      if (ranges.length && (!best || score > best.score))
+        best = { score, ranges };
+    }
+
+    return best;
+  },
+
+  // Empty query matches everything at score 0 (the browse list); title hits
+  // outrank name/path and group hits and are the only ones highlighted.
+  // localStorage can be unavailable (privacy modes) or hold anything after
+  // a downgrade — both read as "no history". No size cap: dedupe bounds the
+  // list by the pages actually visited, i.e. the menu's own scale.
+  readPaletteRecents() {
+    try {
+      const list = JSON.parse(localStorage.getItem(PALETTE_RECENTS_KEY));
+      return Array.isArray(list)
+        ? list.filter((name) => typeof name === "string")
+        : [];
+    } catch {
+      return [];
+    }
+  },
+
+  recordPaletteRecent(name) {
+    try {
+      localStorage.setItem(
+        PALETTE_RECENTS_KEY,
+        JSON.stringify([
+          name,
+          ...this.readPaletteRecents().filter((kept) => kept !== name),
+        ]),
+      );
+    } catch {
+      // History is decorative; a sealed or full store just means none.
+    }
+  },
+
+  // Pure LRU: every visited page floats, so long use converges on a fully
+  // most-recently-used browse order (Sublime's model). Names that vanished
+  // from the menu (ACL change, package removed) drop out here; command rows
+  // never float, whatever the store says.
+  paletteBrowseRecents() {
+    return this.readPaletteRecents().filter((name) =>
+      this.paletteIndex.some(
+        (page) => page.name === name && !page.mode && !page.isLogout,
+      ),
+    );
+  },
+
+  matchPaletteEntry(q, page) {
+    if (!q) return { score: 0, ranges: null };
+
+    const title = this.fuzzyMatch(q, page.title);
+    if (title) return { score: title.score + 12, ranges: title.ranges };
+
+    const rest =
+      this.fuzzyMatch(q, page.name) ||
+      (page.group ? this.fuzzyMatch(q, page.group) : null);
+    return rest && { score: rest.score, ranges: null };
+  },
+
+  collectPaletteMatches(value) {
+    let q = value.trim().toLowerCase();
+    // A leading ">" scopes the list to the command rows (the prototype's
+    // command-only mode); "＞" covers CJK IMEs emitting the full-width form.
+    const cmdOnly = q[0] === ">" || q[0] === "＞";
+    if (cmdOnly) q = q.slice(1).trim();
+    // Browsing floats the recently opened pages; recency rides the same
+    // stable sort as fuzzy rank, so ties keep menu order and typed queries
+    // (which leave recents empty) stay pure fuzzy.
+    const recents = q || cmdOnly ? [] : this.paletteBrowseRecents();
+    const matches = [];
+
+    for (const page of this.paletteIndex) {
+      if (cmdOnly && !page.mode && !page.isLogout) continue;
+      if (page.isLogout && !cmdOnly && !q) continue;
+      const m = this.matchPaletteEntry(q, page);
+      if (!m) continue;
+      const at = recents.indexOf(page.name);
+      matches.push({
+        page,
+        score: at < 0 ? m.score : recents.length - at,
+        ranges: m.ranges,
+      });
+    }
+    if (q || recents.length) matches.sort((a, b) => b.score - a.score);
+    return matches;
+  },
+
+  renderPaletteResults(value) {
+    const matches = this.collectPaletteMatches(value);
+    const theme = localStorage.getItem("aurora.theme") || "device";
+
+    this.paletteInput.removeAttribute("aria-activedescendant");
+    this.paletteList.replaceChildren();
+
+    if (!matches.length) {
+      this.paletteList.appendChild(
+        E("div", { class: "cmdk-empty" }, [_("No entries available")]),
+      );
+      return;
+    }
+
+    matches.forEach(({ page, ranges }, i) => {
+      const current = page.mode && page.mode === theme;
+      const attributes = {
+        class: "cmdk-row",
+        id: `cmdk-option-${i}`,
+        role: "option",
+        "aria-selected": "false",
+        href: page.href || "#",
+      };
+      if (page.mode) attributes["data-mode"] = page.mode;
+      else if (!page.isLogout) attributes["data-name"] = page.name;
+      if (current) attributes["aria-current"] = "true";
+
+      this.paletteList.appendChild(
+        E("a", attributes, [
+          E(
+            "span",
+            { class: "cmdk-title" },
+            this.highlightPaletteMatch(page.title, ranges),
+          ),
+          current
+            ? // The ✓ is decorative (aria-current carries the state); mark
+              // reuses the highlight colour without any new CSS.
+              E("span", { class: "cmdk-group-name", "aria-hidden": "true" }, [
+                E("mark", {}, ["✓"]),
+              ])
+            : page.group
+              ? E("span", { class: "cmdk-group-name" }, [page.group])
+              : "",
+        ]),
+      );
+    });
+
+    this.setPaletteSelection(this.paletteList.firstChild);
+  },
+
+  highlightPaletteMatch(title, ranges) {
+    // Ranges were measured on the lowercased copy; case folding can change
+    // string length ("İ" → "i̇"), skewing offsets into the original — skip
+    // highlighting rather than mis-slice.
+    if (!ranges || title.toLowerCase().length !== title.length) return [title];
+
+    const parts = [];
+    let last = 0;
+    ranges.forEach(([from, to]) => {
+      parts.push(
+        title.slice(last, from),
+        E("mark", {}, [title.slice(from, to)]),
+      );
+      last = to;
+    });
+    parts.push(title.slice(last));
+    return parts;
+  },
+
+  setPaletteSelection(row) {
+    const prev = this.paletteList.querySelector(".is-selected");
+    prev?.classList.remove("is-selected");
+    prev?.setAttribute("aria-selected", "false");
+    row.classList.add("is-selected");
+    row.setAttribute("aria-selected", "true");
+    this.paletteInput.setAttribute("aria-activedescendant", row.id);
+  },
+
+  movePaletteSelection(delta) {
+    const rows = [...this.paletteList.querySelectorAll(".cmdk-row")];
+    if (!rows.length) return;
+
+    const current = rows.findIndex((row) =>
+      row.classList.contains("is-selected"),
+    );
+    const next = rows[(current + delta + rows.length) % rows.length];
+
+    this.setPaletteSelection(next);
+    next.scrollIntoView({ block: "nearest" });
+  },
+
+  togglePalette() {
+    if (!this.palettePanel) this.buildPalette();
+
+    if (this.palettePanel.hidden) this.openPalette();
+    else this.closePalette();
+  },
+
+  openPalette() {
+    this.paletteReturnFocus = document.activeElement;
+    this.paletteTrigger.setAttribute("aria-expanded", "true");
+    this.palettePanel.hidden = false;
+    this.paletteInput.value = "";
+    this.renderPaletteResults("");
+    this.paletteInput.focus();
+    document.addEventListener("pointerdown", this.onPaletteAway);
+  },
+
+  closePalette() {
+    this.paletteTrigger.setAttribute("aria-expanded", "false");
+    this.palettePanel.hidden = true;
+    document.removeEventListener("pointerdown", this.onPaletteAway);
+    if (this.paletteReturnFocus?.isConnected) this.paletteReturnFocus.focus();
+    this.paletteReturnFocus = null;
   },
 
   // Shared scaffolding for the two desktop dropdown modes (mega-menu and
@@ -529,8 +1134,9 @@ return baseclass.extend({
           Math.max(6, Math.ceil(submenu.length / 4)),
         );
         // data-section keys the first-level icon off the node name (stable,
-        // language-independent) — see _layout.css. Unmapped names fall back
-        // to the default icon via var(--menu-icon, …).
+        // language-independent) — see the .desktop-nav-title[data-section]
+        // map in _nav.css. Unmapped names fall back to the default icon via
+        // var(--menu-icon, …).
         children.unshift(
           E("div", { class: "desktop-nav-anchor" }, [
             E(
@@ -570,6 +1176,7 @@ return baseclass.extend({
 
   initMegaMenu(children, url, ul) {
     const container = document.querySelector(".desktop-menu-container");
+    const canvas = container?.querySelector(".desktop-menu-canvas");
     const overlay = document.querySelector(".desktop-menu-overlay");
     const header = document.querySelector("header");
 
@@ -579,28 +1186,44 @@ return baseclass.extend({
     let hideTimer = null;
 
     // Constant canvas: every category opens at the same height — the
-    // tallest submenu wins. Measured lazily on first open (after fonts
-    // settle) and cached, so switching categories is a pure cross-fade
-    // with zero layout work. A resize invalidates the cache.
+    // tallest submenu wins. --mega-menu-height is that panel height alone
+    // (the visible travel; the bar is not part of the wipe distance).
+    // Pre-measured at idle (after fonts settle) so the first hover pays no
+    // synchronous reflow, and cached, so switching categories is a pure
+    // cross-fade with zero layout work. The height stays set across
+    // open/close — it is the sheet's translate reference, not the animated
+    // property. A resize invalidates the cache.
     let canvasHeight = 0;
+    let revealDuration = 300;
 
     const applyCanvasHeight = () => {
       if (!canvasHeight) {
-        const headerHeight =
-          header.querySelector(".header-content")?.offsetHeight || 56;
-        let maxPanel = 0;
         header
           .querySelectorAll(".desktop-nav")
-          .forEach((nav) => (maxPanel = Math.max(maxPanel, nav.offsetHeight)));
-        canvasHeight = headerHeight + maxPanel;
+          .forEach(
+            (nav) => (canvasHeight = Math.max(canvasHeight, nav.offsetHeight)),
+          );
+        // apple.com's flyout pacing: a constant 2px/ms over the visible
+        // travel, clamped to 240–480ms. Short panels open snappily, tall
+        // ones don't blink.
+        revealDuration = Math.min(
+          480,
+          Math.max(240, Math.round(canvasHeight / 2)),
+        );
       }
-      container?.style.setProperty("--mega-menu-height", `${canvasHeight}px`);
+      // Both vars live on the header, not the container: the container
+      // inherits both, and the close fallback timer reads the duration
+      // back off the header (the bar itself must stay transition-free so
+      // theme flips repaint it in the same frame as the page).
+      header.style.setProperty("--mega-menu-height", `${canvasHeight}px`);
+      header.style.setProperty("--mega-menu-duration", `${revealDuration}ms`);
     };
 
+    // Re-measure on resize even while closed — leaving the cache cold would
+    // push the reflow back onto the next hover's open path.
     let resizeTimer = null;
     window.addEventListener("resize", () => {
       canvasHeight = 0;
-      if (!container?.classList.contains("active")) return;
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(applyCanvasHeight, 150);
     });
@@ -651,12 +1274,12 @@ return baseclass.extend({
       );
       if (!hasSubmenu) return;
 
-      // Reparent the panel into the canvas container: the transformed
-      // #topmenu would otherwise become the containing block of the
-      // absolutely-positioned panel and shrink the canvas to the menu's
-      // width. Inside the container the panel is also clipped by the same
-      // clip-path reveal as the rest of the canvas.
-      if (container) container.appendChild(nav);
+      // Reparent the panel into the counter-transformed canvas: the
+      // transformed #topmenu would otherwise become the containing block of
+      // the absolutely-positioned panel and shrink the canvas to the menu's
+      // width. Inside the canvas the panel rides the sheet's compositor
+      // reveal (and is clipped by the sheet's overflow) for free.
+      if (canvas) canvas.appendChild(nav);
 
       li.addEventListener("mouseenter", () => {
         if (hideTimer) {
@@ -683,6 +1306,7 @@ return baseclass.extend({
 
           if (container) {
             applyCanvasHeight();
+            container.dataset.closeToken = "";
             container.classList.add("active");
             container.classList.remove("closing");
             overlay.classList.add("active");
@@ -698,6 +1322,16 @@ return baseclass.extend({
         }
       });
     });
+
+    // Pre-measure the canvas off the interaction path: fonts change panel
+    // heights, so wait for them, then measure when the main thread is idle.
+    // A hover that beats this still falls back to the lazy measure above.
+    const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1));
+    (document.fonts?.ready || Promise.resolve()).then(() =>
+      idle(() => {
+        if (!canvasHeight) applyCanvasHeight();
+      }),
+    );
 
     const hideMenu = () => {
       if (showTimer) {
@@ -777,41 +1411,61 @@ return baseclass.extend({
     )
       return;
 
+    // Retract the curtain: removing `.active` sends the sheet back to
+    // translateY(-100%) and the canvas to its counter-position — the drawer
+    // close, run entirely on the compositor. --mega-menu-height stays put;
+    // it is the translate reference, not the animated property. `.closing`
+    // keeps the container in the tree only while its opacity fades out and
+    // the sheet returns to the closed translate position.
     container.classList.add("closing");
     container.classList.remove("active");
 
-    // Retract the canvas: dropping --mega-menu-height lets the container's
-    // height fall to its 0 fallback, and because the container transitions
-    // height (see _layout.css) it animates the collapse — the drawer close —
-    // instead of the height vanishing in one frame after the fade. overflow
-    // -hidden clips the content as it goes; the end state is already h-0 so no
-    // post-transition reset is needed.
-    container.style.removeProperty("--mega-menu-height");
+    const sheet = container.querySelector(".desktop-menu-sheet");
+    const closeToken = `${Date.now()}-${Math.random()}`;
+    container.dataset.closeToken = closeToken;
 
     let closeFallback = null;
     const finishClosing = (event) => {
-      if (event?.target && event.target !== container) return;
-      if (event?.propertyName && event.propertyName !== "height") return;
-
+      if (event?.target && event.target !== sheet) return;
+      if (container.dataset.closeToken !== closeToken) {
+        if (closeFallback !== null) {
+          clearTimeout(closeFallback);
+          closeFallback = null;
+        }
+        sheet?.removeEventListener("transitionend", finishClosing);
+        return;
+      }
       if (closeFallback !== null) {
         clearTimeout(closeFallback);
         closeFallback = null;
       }
 
-      container.removeEventListener("transitionend", finishClosing);
+      sheet?.removeEventListener("transitionend", finishClosing);
 
       if (!container.classList.contains("active")) {
         container.classList.remove("closing");
+        delete container.dataset.closeToken;
       }
     };
 
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+    if (
+      !sheet ||
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+    ) {
       finishClosing();
       return;
     }
 
-    container.addEventListener("transitionend", finishClosing);
-    closeFallback = setTimeout(finishClosing, 350);
+    sheet.addEventListener("transitionend", finishClosing);
+    // The retract duration is distance-adaptive (see applyCanvasHeight);
+    // read it back so the safety net always outlasts the real transition.
+    const duration =
+      parseInt(
+        document
+          .querySelector("header")
+          ?.style.getPropertyValue("--mega-menu-duration"),
+      ) || 300;
+    closeFallback = setTimeout(finishClosing, duration + 50);
   },
 
   renderModeMenu(tree) {
@@ -846,6 +1500,7 @@ return baseclass.extend({
       );
       this.renderMainMenu(activeChild, activeChild.name, 0, navigationItems);
       this.renderMobileMenu(navigationItems);
+      this.initPalette(navigationItems);
     }
 
     if (ul?.children.length > 1) {

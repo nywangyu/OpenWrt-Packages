@@ -83,7 +83,7 @@ test("shared navigation styles define active and expanded states", () => {
   assertIncludesUtilities(sublink, [
     "font-medium",
     "hover:bg-hover-faint",
-    "rounded-lg",
+    "rounded-xl",
   ]);
   assertIncludesUtilities(activeSublink, [
     "text-brand",
@@ -108,7 +108,7 @@ test("shared navigation styles own accordion animation without a guide rail", ()
     "after:transition-[transform,opacity]",
     "after:duration-[250ms]",
   ]);
-  assert.match(toggle, /arrow-right\.svg/);
+  assert.match(toggle, /var\(--icon-arrow-right\)/);
   assertIncludesUtilities(region, [
     "grid",
     "grid-rows-[0fr]",
@@ -125,11 +125,16 @@ test("shared navigation styles own accordion animation without a guide rail", ()
 test("desktop sidebar styles only provide desktop navigation density", () => {
   const sidebar = getBlock(layoutStyles, 'body[data-nav-type="sidebar"]');
   const direct = getBlock(sidebar, "& .sidebar-list .navigation-direct");
+  const icon = getBlock(sidebar, "& .sidebar-list .nav-icon");
   const submenu = getBlock(sidebar, "& .sidebar-submenu");
   const sublink = getBlock(sidebar, "& .sidebar-submenu .navigation-sublink");
 
-  assertIncludesUtilities(direct, ["truncate", "text-lg"]);
-  assertIncludesUtilities(submenu, ["pl-4"]);
+  // Direct rows are icon + label flex rows; the label span truncates.
+  assertIncludesUtilities(direct, ["flex", "items-center", "gap-2", "text-lg"]);
+  assertIncludesUtilities(icon, ["size-4.5"]);
+  // pl-6.5 hangs sublink text off the parent label (px-3 + icon + gap −
+  // the sublink's own px-3), not the row edge.
+  assertIncludesUtilities(submenu, ["pl-6.5"]);
   assertIncludesUtilities(sublink, ["px-3", "py-1.5", "text-sm"]);
   assert.doesNotMatch(
     sidebar,
@@ -140,10 +145,15 @@ test("desktop sidebar styles only provide desktop navigation density", () => {
 
 test("mobile drawer styles only provide mobile navigation density", () => {
   const drawer = getBlock(overlayStyles, ".mobile-menu-overlay");
+  const icon = getBlock(drawer, "& .nav-icon");
   const submenu = getBlock(drawer, "& .mobile-nav-submenu-list");
   const sublink = getBlock(drawer, "& .mobile-nav-sublink");
 
-  assertIncludesUtilities(submenu, ["max-md:pl-4"]);
+  // Row icons at drawer scale, against the text-2xl labels.
+  assertIncludesUtilities(icon, ["max-md:size-6"]);
+  // pl-6 hangs sublink text off the parent label (rows are px-0: icon +
+  // gap − the sublink's own px-3).
+  assertIncludesUtilities(submenu, ["max-md:pl-6"]);
   assertIncludesUtilities(sublink, [
     "max-md:min-h-10",
     "max-md:px-3",
@@ -166,22 +176,64 @@ test("mega-menu panels scroll within the viewport", () => {
   assertIncludesUtilities(panel, ["overflow-y-auto", "overscroll-contain"]);
 });
 
-test("mega-menu closing state keeps the panel above the curtain", () => {
+test("mega-menu reveal and retract share the page-top origin", () => {
   const megaMenu = getBlock(layoutStyles, '[data-nav-type="mega-menu"] &');
+  const headerContent = getBlock(layoutStyles, "& .header-content");
   const container = getBlock(megaMenu, "& .desktop-menu-container");
+  const sheet = getBlock(container, "& .desktop-menu-sheet");
+  const canvas = getBlock(container, "& .desktop-menu-canvas");
+  const panel = getBlock(megaMenu, "& .desktop-nav");
   const headerLift = layoutStyles.match(
-    /When a category is open[\s\S]*?(\[data-nav-type="mega-menu"\][\s\S]*?)\n\s*\.brand/,
+    /The bar must sit above[\s\S]*?(\[data-nav-type="mega-menu"\][\s\S]*?)\n\s*\.brand/,
   )?.[1];
 
+  assertIncludesUtilities(headerContent, ["z-10"]);
+  assertIncludesUtilities(container, ["top-0", "z-0"]);
+  assert.doesNotMatch(
+    container,
+    /@apply bg-mega-menu-bg pointer-events-none absolute inset-x-0 top-0 h-14/,
+  );
   assert.match(
     container,
     /&\.active,\s*&\.closing\s*\{[\s\S]*@apply[^;]*\bvisible\b/,
   );
   assert.match(
     container,
+    /&\.closing\s*\{[\s\S]*@apply[^;]*\bopacity-0\b[^;]*\btransition-opacity\b[^;]*\bduration-\[220ms\]/,
+  );
+  assert.match(
+    container,
     /&\.active\s*\{[\s\S]*@apply[^;]*pointer-events-auto/,
   );
-  assert.match(headerLift ?? "", /desktop-menu-container[\s\S]*closing/);
+  assertIncludesUtilities(sheet, ["top-0", "-translate-y-full"]);
+  assert.match(
+    sheet,
+    /h-\[calc\(var\(--mega-menu-height,0px\)\+3\.5rem\)\]/,
+  );
+  assertIncludesUtilities(canvas, ["translate-y-full"]);
+  assertIncludesUtilities(panel, ["top-14"]);
+  // z-70 must span the retract too (or the curtain dims the closing panel).
+  assert.match(
+    headerLift ?? "",
+    /desktop-menu-container:is\(\.active, \.closing\)\)\s*\{\s*@apply[^;]*z-70/,
+  );
+  // The bar no longer performs its own background transition. The flyout sheet
+  // owns the opened surface and retracts fully to page top before hiding.
+  assert.doesNotMatch(headerLift ?? "", /bg-mega-menu-bg/);
+});
+
+test("theme flips repaint the bar in the same frame as the page", () => {
+  const headerDeclaration = layoutStyles.match(
+    /^header \{\s*@apply ([^;]+);/m,
+  )?.[1];
+
+  assert.ok(headerDeclaration, "Missing header root declaration");
+  assertIncludesUtilities(headerDeclaration, ["bg-bg", "sticky"]);
+  // A colour transition on the bar itself would ease its bg/text over
+  // --mega-menu-duration on every data-darkmode flip, lagging the bar behind
+  // the untransitioned page in all three nav modes. The mega-menu wipe colour
+  // lives on .desktop-menu-sheet, which carries its own transition.
+  assert.doesNotMatch(headerDeclaration, /\btransition/);
 });
 
 test("mega-menu category masks use Tailwind arbitrary utilities", () => {
@@ -190,7 +242,11 @@ test("mega-menu category masks use Tailwind arbitrary utilities", () => {
 
   assert.match(
     icon,
-    /@apply[^;]*\[mask:var\(--menu-icon,url\(["']@assets\/icons\/category\.svg["']\)\)_center\/contain_no-repeat\]/,
+    /@apply[^;]*\[mask:var\(--menu-icon,var\(--icon-category\)\)_center\/contain_no-repeat\]/,
   );
+  // The default lives in the var() fallback only. Declaring --menu-icon on
+  // the title compiles into a (0,5,1) selector chain that outranks every
+  // .desktop-nav-title[data-section=…] (0,2,0) mapping in _nav.css.
+  assert.doesNotMatch(title, /--menu-icon:/);
   assert.doesNotMatch(layoutStyles, /^\s*mask\s*:/m);
 });
