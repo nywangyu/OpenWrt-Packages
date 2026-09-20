@@ -3,7 +3,9 @@
 }
 
 html {
-  @apply [scrollbar-color:var(--text-muted)_var(--surface)] [scrollbar-width:thin];
+  /* Stable gutter: short pages and open modals (body overflow hidden) would
+     otherwise drop the classic scrollbar and shift the whole layout. */
+  @apply [scrollbar-color:var(--text-muted)_var(--surface)] [scrollbar-gutter:stable] [scrollbar-width:thin];
 
   body {
     @apply text-text relative flex min-h-dvh flex-col text-sm leading-relaxed font-normal;
@@ -48,7 +50,7 @@ h6 {
 }
 
 hr {
-  @apply border-0;
+  @apply border-hairline my-6 border-t max-md:my-4;
 }
 
 strong {
