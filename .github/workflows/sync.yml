@@ -36,6 +36,7 @@ jobs:
                 "taskd": "https://github.com/linkease/istore",
                 "quickstart": "https://github.com/linkease/nas-packages",
                 "luci-app-quickstart": "https://github.com/linkease/nas-packages-luci",
+                "luci-app-istorex": "https://github.com/linkease/nas-packages-luci",
                 "luci-app-openclash": "https://github.com/vernesong/OpenClash",
                 "luci-app-oaf": "https://github.com/db-one/dbone-packages 23.05",
                 "luci-app-easytier": "https://github.com/EasyTier/luci-app-easytier",
@@ -50,6 +51,7 @@ jobs:
               {
                 "quickstart": "network/services/quickstart",
                 "luci-app-quickstart": "luci/luci-app-quickstart",
+                "luci-app-istorex": "luci/luci-app-istorex",
                 "luci-app-openclash": "luci-app-openclash",
                 "luci-app-filebrowser": "luci-app-filebrowser",
                 "luci-app-store": "luci/luci-app-store",
